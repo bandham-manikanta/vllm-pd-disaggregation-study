@@ -1,0 +1,15 @@
+vllm @ git+https://github.com/vllm-project/vllm.git@b7134d5eb61271302d048eaf6ae085aa8f04ea39
+torch>=2.4.0
+triton>=3.0.0
+ray>=2.35.0
+nixl>=1.3.2
+fastapi>=0.115.0
+uvicorn>=0.30.0
+httpx>=0.27.0
+requests>=2.31.0
+aiohttp>=3.9.0
+pandas>=2.0.0
+numpy>=1.26.0
+tabulate>=0.9.0
+tqdm>=4.66.0
+pydantic>=2.8.0

@@ -1,0 +1,43 @@
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Name
+28.8,805608035,1224,658176.5,517764.0,231618,934471,227997.4,ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_64x3_tn
+27.4,765848697,1998,383307.7,383204.0,372099,393540,2688.1,ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x3_tn
+7.5,210194329,1008,208526.1,200801.5,165281,240834,24992.8,ampere_bf16_s16816gemm_bf16_128x256_ldg8_f2f_stages_64x3_tn
+6.8,189630190,792,239432.1,289730.5,13440,427747,150501.7,"void flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<(int)128, (int)64, (int)128, (int)4, (bool)0, (bool)0, cutlass::bfloat16_t, Flash_kernel_traits<(int)128, (int)64, (int)128, (int)4, cutlass::bfloat16_t>>, (bool)1, (bool)0, (bool)0, (bool)0, (bool)1, (bool)0, (bool)0, (bool)0>(flash::Flash_fwd_params)"
+6.7,186483567,2052,90878.9,90752.5,89121,106945,1543.5,"void at::native::<unnamed>::cunn_SoftMaxForward<(int)4, float, float, float, at::native::<unnamed>::SoftMaxForwardEpilogue>(T4 *, const T2 *, int)"
+6.4,179133178,1168,153367.4,143969.5,113921,4724912,148001.0,ncclDevKernel_AllReduce_Sum_bf16_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)
+3.4,95310212,2052,46447.5,46432.0,45088,55169,888.3,"void flashinfer::sampling::RadixTopKMaskLogitsKernel_MultiCTA<(unsigned int)1024, (unsigned int)4, (bool)0, float, int>(T4 *, T4 *, T5 *, unsigned int, unsigned int, unsigned int, flashinfer::sampling::RadixRowState *, unsigned int, unsigned int)"
+1.5,43176247,2052,21041.1,19680.0,13952,200866,7314.1,ncclDevKernel_AllGather_RING_LL(ncclDevKernelArgsStorage<(unsigned long)4096>)
+1.4,39586423,2052,19291.6,18400.0,17984,67552,4638.0,"void flashinfer::sampling::TopPSamplingFromProbKernel<(unsigned int)1024, (cub::_V_300302_SM_800::BlockScanAlgorithm)2, (cub::_V_300302_SM_800::BlockReduceAlgorithm)2, (unsigned int)4, (bool)1, float, int>(T6 *, T7 *, bool *, T7 *, float *, float, unsigned int, unsigned long *, unsigned long, unsigned long *, unsigned long)"
+1.0,27607687,576,47930.0,49441.0,32320,51105,3852.2,triton_red_fused_fused_add_rms_norm_2
+1.0,26546022,6156,4312.2,4480.0,3712,6048,356.5,"void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void at::native::index_kernel_impl<at::native::OpaqueType<(int)4>>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>)::[lambda(char *, const char *, long) (instance 1)]>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>, const T1 &, bool)::[lambda(int) (instance 1)]>(long, T3)"
+0.9,25162922,576,43685.6,45024.0,33537,45825,3654.5,triton_poi_fused_mul_silu_slice_1
+0.6,17733754,576,30787.8,31489.0,24032,32673,2125.0,triton_red_fused_fused_add_rms_norm_0
+0.6,15745324,560,28116.7,28641.0,24641,29569,1351.8,triton_red_fused_3
+0.5,13926838,2052,6787.0,6752.0,6112,13152,397.3,_temperature_kernel
+0.4,11851848,2052,5775.8,5824.0,4640,7232,408.4,_post_update_kernel
+0.4,11813105,2052,5756.9,5728.0,4704,7200,157.2,_gather_block_tables_kernel
+0.4,11717468,792,14794.8,18816.0,2944,20096,6346.6,"void vllm::reshape_and_cache_flash_kernel<__nv_bfloat16, __nv_bfloat16, (vllm::Fp8KVCacheDataType)0>(const T1 *, const T1 *, T2 *, T2 *, const long *, long, long, long, long, long, int, int, int, const float *, const float *, int)"
+0.4,10850685,2052,5287.9,5440.0,3744,6144,249.3,_combine_sampled_and_draft_tokens_kernel
+0.4,10415765,2052,5075.9,5216.0,4000,6368,235.0,_get_num_sampled_and_rejected_kernel
+0.4,10349935,2052,5043.8,4992.0,4896,8800,345.6,"void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)], std::array<char *, (unsigned long)2>, (int)4, TrivialOffsetCalculator<(int)1, unsigned int>, TrivialOffsetCalculator<(int)1, unsigned int>, at::native::memory::LoadWithCast<(int)1>, at::native::memory::StoreWithCast<(int)1>>(int, T1, T2, T4, T5, T6, T7)"
+0.3,9764029,2044,4776.9,4736.0,4640,7008,211.1,"void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 12)]::operator ()() const::[lambda(c10::BFloat16) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)"
+0.3,9250482,24,385436.8,385107.5,377795,394852,5196.0,ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f_stages_64x6_tn
+0.3,9227022,72,128153.1,128113.0,125090,131297,1928.9,ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn
+0.3,8524782,22,387490.1,388611.5,378820,400612,6222.9,ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x4_tn
+0.3,7987918,2052,3892.7,3872.0,3552,4576,121.1,"void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void at::native::index_kernel_impl<at::native::OpaqueType<(int)8>>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>)::[lambda(char *, const char *, long) (instance 1)]>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>, const T1 &, bool)::[lambda(int) (instance 1)]>(long, T3)"
+0.3,7917133,2052,3858.3,3904.0,3680,6561,234.1,_compute_slot_mappings_kernel
+0.2,5774106,2044,2824.9,2784.0,2496,3585,103.3,"void at::native::vectorized_gather_kernel<(int)16, long>(char *, char *, T2 *, int, long, long, long, long, bool)"
+0.2,5552440,4104,1352.9,1376.0,1248,1664,62.1,"void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<int>, std::array<char *, (unsigned long)1>>(int, T2, T3)"
+0.2,4979057,2052,2426.4,2432.0,2208,3072,85.3,"void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 4)]::operator ()() const::[lambda(long) (instance 1)], std::array<char *, (unsigned long)2>, (int)4, TrivialOffsetCalculator<(int)1, unsigned int>, TrivialOffsetCalculator<(int)1, unsigned int>, at::native::memory::LoadWithCast<(int)1>, at::native::memory::StoreWithCast<(int)1>>(int, T1, T2, T4, T5, T6, T7)"
+0.2,4343459,2052,2116.7,2240.0,1760,2816,166.5,_prepare_pos_seq_lens_kernel
+0.1,2980998,2052,1452.7,1472.0,1280,1888,56.0,"void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<bool>, std::array<char *, (unsigned long)1>>(int, T2, T3)"
+0.1,2920379,8,365047.4,364915.5,360100,372100,3452.7,ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f_stages_64x5_tn
+0.1,2762805,2052,1346.4,1376.0,1248,1600,54.5,"void <unnamed>::elementwise_kernel_with_index<int, at::native::arange_cuda_out(const c10::Scalar &, const c10::Scalar &, const c10::Scalar &, at::Tensor &)::[lambda() (instance 1)]::operator ()() const::[lambda() (instance 3)]::operator ()() const::[lambda(long) (instance 1)]>(T1, T2, function_traits<T2>::result_type *)"
+0.0,1290956,256,5042.8,4768.0,4096,8000,811.6,_apply_write_kernel
+0.0,456036,16,28502.3,29184.0,25536,29824,1429.0,triton_red_fused_1
+0.0,296101,16,18506.3,19424.5,14336,19712,1789.7,triton_red_fused_rms_norm_0
+0.0,284708,16,17794.3,18224.5,10304,25696,4757.6,"void vllm::vocab_embedding::vocab_parallel_embedding_kernel<int, uint4>(T2 *, const T1 *, const T2 *, long, long, long, long, long, long, long)"
+0.0,160928,22,7314.9,7552.0,4768,9120,1276.2,_prepare_prefill_inputs_kernel
+0.0,49409,8,6176.1,6176.0,5984,6368,126.7,"void at::native::index_elementwise_kernel<(int)128, (int)4, void at::native::gpu_index_kernel<void at::native::index_kernel_impl<at::native::OpaqueType<(int)2>>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>)::[lambda(char *, const char *, long) (instance 1)]>(at::TensorIteratorBase &, c10::ArrayRef<long>, c10::ArrayRef<long>, const T1 &, bool)::[lambda(int) (instance 1)]>(long, T3)"
+0.0,29120,18,1617.8,1568.0,1504,2048,148.6,"void at::native::vectorized_elementwise_kernel<(int)2, at::native::FillFunctor<bool>, std::array<char *, (unsigned long)1>>(int, T2, T3)"
+0.0,14144,10,1414.4,1248.0,1216,2016,321.7,"void at::native::unrolled_elementwise_kernel<at::native::FillFunctor<bool>, std::array<char *, (unsigned long)1>, (int)4, TrivialOffsetCalculator<(int)0, unsigned int>, TrivialOffsetCalculator<(int)1, unsigned int>, at::native::memory::LoadWithoutCast, at::native::memory::StoreWithoutCast>(int, T1, T2, T4, T5, T6, T7)"

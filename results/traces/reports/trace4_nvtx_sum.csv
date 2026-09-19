@@ -1,0 +1,5 @@
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Style,Range
+92.9,2933212991,194,15119654.6,208257.5,183486,953658731,117869936.4,PushPop,:execute_context_0(0)_generation_0(0)
+4.7,147728918,124,1191362.2,1144172.5,1097493,2816991,229892.8,PushPop,:execute_context_0(0)_generation_1(1)
+2.2,69380683,4,17345170.8,17338503.5,15923093,18780583,1494584.4,PushPop,:execute_context_1(1)_generation_0(0)
+0.2,6441038,128,50320.6,47336.0,44579,127936,10192.0,PushPop,NCCL:ncclAllGather

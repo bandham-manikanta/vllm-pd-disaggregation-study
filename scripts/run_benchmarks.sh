@@ -1,0 +1,302 @@
+﻿#!/usr/bin/env bash
+#
+# run_benchmarks.sh - Canonical vLLM Benchmark Suite
+#
+# Single universal benchmark runner for all cluster experiments (2-GPU, 3-GPU, 4-GPU, 8-GPU).
+# Automatically probes both /health and /healthcheck.
+#
+# Usage:
+#   bash scripts/run_benchmarks.sh <SYSTEM_NAME> [PORT] [MODEL_NAME] [HOST]
+#
+# Examples:
+#   bash scripts/run_benchmarks.sh collocated_1x_tp2 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh collocated_2x_tp1 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_1p1d 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh collocated_3x_tp1 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_1p2d 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh collocated_4x_tp1 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh collocated_2x_tp2 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_1p3d 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_2p2d 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh collocated_4x_tp2 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_4p4d_ib 8000 Qwen/Qwen3-8B
+#   bash scripts/run_benchmarks.sh disagg_2p6d_ib 8000 Qwen/Qwen3-8B
+#
+set -euo pipefail
+
+# ==============================================================================
+# Configuration & Paths
+# ==============================================================================
+SYSTEM_NAME=${1:?"Error: SYSTEM_NAME is required. Usage: bash scripts/run_benchmarks.sh <SYSTEM_NAME> [PORT] [MODEL_NAME] [HOST]"}
+PORT=${2:-8000}
+MODEL_NAME=${3:-"Qwen/Qwen3-8B"}
+HOST=${4:-"127.0.0.1"}
+
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VLLM_BIN="${VENV_DIR}/bin/vllm"
+OUT_DIR="${PROJECT_DIR}/results/${SYSTEM_NAME}"
+
+mkdir -p "${OUT_DIR}"
+
+echo "================================================================="
+echo " Starting Benchmark Suite: ${SYSTEM_NAME}"
+echo " Model:    ${MODEL_NAME}"
+echo " Endpoint: http://${HOST}:${PORT}/v1/completions"
+echo " Results:  ${OUT_DIR}"
+echo "================================================================="
+
+# Pre-flight check (probes both /health and /healthcheck with auto-fallback to peer nodes)
+echo "[*] Checking server health at http://${HOST}:${PORT} ..."
+if curl -s -f "http://${HOST}:${PORT}/health" > /dev/null 2>&1; then
+  echo "[✓] Server is healthy and ready (/health)."
+elif curl -s -f "http://${HOST}:${PORT}/healthcheck" > /dev/null 2>&1; then
+  echo "[✓] Server is healthy and ready (/healthcheck)."
+elif [ "${HOST}" = "127.0.0.1" ] || [ "${HOST}" = "localhost" ]; then
+  echo "[*] 127.0.0.1:${PORT} not reachable. Probing cluster nodes for active proxy..."
+  FOUND=0
+  for PEER in "10.10.4.174" "10.10.4.176" "10.10.4.172"; do
+    if curl -s -f "http://${PEER}:${PORT}/health" > /dev/null 2>&1 || curl -s -f "http://${PEER}:${PORT}/healthcheck" > /dev/null 2>&1; then
+      HOST="${PEER}"
+      FOUND=1
+      echo "[✓] Found active proxy on ${HOST}:${PORT}! Routing benchmarks to http://${HOST}:${PORT}/v1/completions."
+      break
+    fi
+  done
+  if [ "$FOUND" -eq 0 ]; then
+    echo "[!] Error: Server did not respond at http://127.0.0.1:${PORT} or any cluster peer node."
+    exit 1
+  fi
+else
+  echo "[!] Error: Server at http://${HOST}:${PORT} did not respond to /health or /healthcheck."
+  exit 1
+fi
+
+# Warmup run to trigger CUDA Graph capture and stabilize memory pools
+echo "-----------------------------------------------------------------"
+echo "[*] Running warmup phase (4 requests, 512 in x 128 out, concurrency 2)..."
+echo "-----------------------------------------------------------------"
+"${VLLM_BIN}" bench serve \
+  --backend vllm \
+  --host "${HOST}" \
+  --port "${PORT}" \
+  --model "${MODEL_NAME}" \
+  --endpoint /v1/completions \
+  --dataset-name random \
+  --random-input-len 512 \
+  --random-output-len 128 \
+  --num-prompts 4 \
+  --max-concurrency 2 > /dev/null 2>&1 || true
+
+echo "[✓] Warmup complete. CUDA graphs and memory pools stabilized."
+
+# =================================================================
+# Phase 1: Macro Workload Matrix (C = 1, 4, 16, 32, 64)
+# =================================================================
+echo "================================================================="
+echo " [PHASE 1] Running Macro Workload Matrix"
+echo "================================================================="
+declare -a WORKLOADS=(
+  "decode_heavy 256 1024"
+  "balanced 1024 512"
+  "enterprise_rag 8192 128"
+)
+
+for wl in "${WORKLOADS[@]}"; do
+  read -r name in_len out_len <<< "$wl"
+  
+  if [ "$name" == "enterprise_rag" ]; then
+    CONCURRENCIES=("1" "4" "8" "16")
+  elif [ "$name" == "balanced" ]; then
+    CONCURRENCIES=("1" "4" "16" "32")
+  else
+    CONCURRENCIES=("1" "4" "16" "32" "64")
+  fi
+
+  for c in "${CONCURRENCIES[@]}"; do
+    if [ "$c" -eq 1 ]; then
+      NUM_PROMPTS=32
+    elif [ "$c" -eq 4 ]; then
+      NUM_PROMPTS=48
+    elif [ "$c" -eq 8 ]; then
+      NUM_PROMPTS=48
+    elif [ "$c" -eq 16 ]; then
+      NUM_PROMPTS=64
+    elif [ "$c" -eq 32 ]; then
+      NUM_PROMPTS=96
+    else
+      NUM_PROMPTS=128
+    fi
+    
+    OUT_FILE="${name}_${in_len}x${out_len}_c${c}_${SYSTEM_NAME}.json"
+    
+    echo "-----------------------------------------------------------------"
+    echo "[+] Running: ${name} (${in_len} in x ${out_len} out) | Concurrency: ${c} | Prompts: ${NUM_PROMPTS}"
+    echo "-----------------------------------------------------------------"
+    
+    "${VLLM_BIN}" bench serve \
+      --backend vllm \
+      --host "${HOST}" \
+      --port "${PORT}" \
+      --model "${MODEL_NAME}" \
+      --endpoint /v1/completions \
+      --dataset-name random \
+      --random-input-len "${in_len}" \
+      --random-output-len "${out_len}" \
+      --num-prompts "${NUM_PROMPTS}" \
+      --max-concurrency "${c}" \
+      --save-result \
+      --result-dir "${OUT_DIR}" \
+      --result-filename "${OUT_FILE}"
+    
+    echo "[✓] Saved: ${OUT_DIR}/${OUT_FILE}"
+    sleep 3
+  done
+done
+
+# =================================================================
+# Phase 2: Sustained Injected Burst Shockwave Test
+# =================================================================
+echo "================================================================="
+echo " [PHASE 2] Sustained Injected Burst Shockwave Test"
+echo " Evaluating P99 typing stutter and queue latency under burst"
+echo "================================================================="
+
+BURST_OUT_FILE="injected_burst_${SYSTEM_NAME}.json"
+DECODE_UNDER_BURST_FILE="decode_under_burst_${SYSTEM_NAME}.json"
+
+echo "[+] Step 1: Launching sustained background prefill storm (8192 in x 16 out, C=4, 48 prompts)..."
+"${VLLM_BIN}" bench serve \
+  --backend vllm \
+  --host "${HOST}" \
+  --port "${PORT}" \
+  --model "${MODEL_NAME}" \
+  --endpoint /v1/completions \
+  --dataset-name random \
+  --random-input-len 8192 \
+  --random-output-len 16 \
+  --num-prompts 48 \
+  --max-concurrency 4 \
+  --save-result \
+  --result-dir "${OUT_DIR}" \
+  --result-filename "${BURST_OUT_FILE}" &
+BURST_PID=$!
+
+sleep 1.0
+
+echo "[+] Step 2: Firing interactive decode stream directly into the prefill storm (256 in x 512 out)..."
+"${VLLM_BIN}" bench serve \
+  --backend vllm \
+  --host "${HOST}" \
+  --port "${PORT}" \
+  --model "${MODEL_NAME}" \
+  --endpoint /v1/completions \
+  --dataset-name random \
+  --random-input-len 256 \
+  --random-output-len 512 \
+  --num-prompts 16 \
+  --max-concurrency 4 \
+  --save-result \
+  --result-dir "${OUT_DIR}" \
+  --result-filename "${DECODE_UNDER_BURST_FILE}"
+
+echo "[*] Step 3: Waiting for background prefill storm to finalize cleanly..."
+wait "${BURST_PID}" 2>/dev/null || true
+echo "[✓] Burst Shockwave test complete. Both result files successfully flushed to disk."
+sleep 3
+
+# =================================================================
+# Phase 3: Context Length Sweep (Physical Interconnect Scaling)
+# =================================================================
+echo "================================================================="
+echo " [PHASE 3] Context Length Scaling Sweep"
+echo " Sweeping prompt lengths 512 -> 16,384 tokens to measure KV transfer"
+echo "================================================================="
+
+CONTEXT_LENGTHS=("512" "1024" "2048" "4096" "8192" "16384")
+
+for ctx in "${CONTEXT_LENGTHS[@]}"; do
+  SWEEP_OUT_FILE="context_sweep_${ctx}in_32out_${SYSTEM_NAME}.json"
+  
+  echo "-----------------------------------------------------------------"
+  echo "[+] Context Sweep: Prompt Length = ${ctx} tokens (Output = 32 tokens, 16 prompts)"
+  echo "-----------------------------------------------------------------"
+  
+  "${VLLM_BIN}" bench serve \
+    --backend vllm \
+    --host "${HOST}" \
+    --port "${PORT}" \
+    --model "${MODEL_NAME}" \
+    --endpoint /v1/completions \
+    --dataset-name random \
+    --random-input-len "${ctx}" \
+    --random-output-len 32 \
+    --num-prompts 16 \
+    --max-concurrency 2 \
+    --save-result \
+    --result-dir "${OUT_DIR}" \
+    --result-filename "${SWEEP_OUT_FILE}"
+    
+  echo "[✓] Saved: ${OUT_DIR}/${SWEEP_OUT_FILE}"
+  sleep 3
+done
+
+# =================================================================
+# Phase 4: Calibrated Poisson Open-Loop SLA Sweeps
+# =================================================================
+echo "================================================================="
+echo " [PHASE 4] Calibrated Poisson Open-Loop SLA Sweeps"
+echo " Measuring P99 TTFT and P99 ITL SLA violation curves"
+echo "================================================================="
+
+# Calibrated rates avoiding queue explosion:
+# Enterprise RAG (8192 in): max prefill rate is ~4.5 req/s on A100.
+RAG_RATES=("1.1" "2.2" "3.1" "3.8" "4.3")
+for r in "${RAG_RATES[@]}"; do
+  POISSON_OUT_FILE="poisson_enterprise_rag_8192x128_rate${r}_${SYSTEM_NAME}.json"
+  echo "[+] Poisson Sweep Enterprise RAG: Rate = ${r} req/s (64 prompts)"
+  "${VLLM_BIN}" bench serve \
+    --backend vllm \
+    --host "${HOST}" \
+    --port "${PORT}" \
+    --model "${MODEL_NAME}" \
+    --endpoint /v1/completions \
+    --dataset-name random \
+    --random-input-len 8192 \
+    --random-output-len 128 \
+    --num-prompts 64 \
+    --request-rate "${r}" \
+    --burstiness 1.0 \
+    --save-result \
+    --result-dir "${OUT_DIR}" \
+    --result-filename "${POISSON_OUT_FILE}" || true
+  sleep 3
+done
+
+# Balanced (1024 in x 512 out)
+BALANCED_RATES=("2" "4" "8" "12" "16")
+for r in "${BALANCED_RATES[@]}"; do
+  POISSON_OUT_FILE="poisson_balanced_1024x512_rate${r}_${SYSTEM_NAME}.json"
+  echo "[+] Poisson Sweep Balanced: Rate = ${r} req/s (64 prompts)"
+  "${VLLM_BIN}" bench serve \
+    --backend vllm \
+    --host "${HOST}" \
+    --port "${PORT}" \
+    --model "${MODEL_NAME}" \
+    --endpoint /v1/completions \
+    --dataset-name random \
+    --random-input-len 1024 \
+    --random-output-len 512 \
+    --num-prompts 64 \
+    --request-rate "${r}" \
+    --burstiness 1.0 \
+    --save-result \
+    --result-dir "${OUT_DIR}" \
+    --result-filename "${POISSON_OUT_FILE}" || true
+  sleep 3
+done
+
+echo "================================================================="
+echo " Benchmark Suite for ${SYSTEM_NAME} COMPLETE!"
+echo " All results saved in: ${OUT_DIR}"
+echo "================================================================="

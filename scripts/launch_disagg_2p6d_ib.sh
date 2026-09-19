@@ -1,0 +1,128 @@
+﻿#!/bin/bash
+#
+# launch_disagg_2p6d_ib.sh
+#
+# Canonical 1:3 Asymmetric Disaggregation across 8 GPUs (2 Nodes):
+#   - Node A (a100-04): 2 Prefill (GPUs 0, 1) + 2 Decode (GPUs 2, 3)
+#   - Node B (a100-02): 4 Decode (GPUs 0, 1, 2, 3)
+#   - Proxy: Node A Port 8000 (Multiplexing 2 Prefill -> 6 Decoders)
+#
+set -euo pipefail
+
+MODEL=${1:-"Qwen/Qwen3-8B"}
+NODE_A=${NODE_A:-"a100-04"}
+NODE_B=${NODE_B:-"a100-02"}
+IP_A=${IP_A:-"10.10.4.174"}
+IP_B=${IP_B:-"10.10.4.172"}
+
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
+VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+LOG_DIR="${PROJECT_DIR}/logs"
+PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
+
+export PATH="${VENV_DIR}/bin:$PATH"
+mkdir -p "$LOG_DIR"
+
+echo "================================================================="
+echo " Launching Canonical 2P:6D Disaggregation across 8 GPUs"
+echo " Node A (${NODE_A}): 2 Prefill (:8101, :8102) + 2 Decode (:8201, :8202)"
+echo " Node B (${NODE_B}): 4 Decode (:8203, :8204, :8205, :8206)"
+echo " Proxy:  ${NODE_A} Port 8000"
+echo " Model:  ${MODEL}"
+echo "================================================================="
+
+echo "=== [1/5] Cleaning prior processes on ${NODE_A} and ${NODE_B} ==="
+bash "${PROJECT_DIR}/scripts/stop_services.sh" "${NODE_A}" "${NODE_B}"
+
+echo "=== [2/5] Launching 2 Prefill & 2 Decode on ${NODE_A} ==="
+ssh "${NODE_A}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  CUDA_VISIBLE_DEVICES=0 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_A}\" VLLM_NIXL_SIDE_CHANNEL_PORT=5551 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8101 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_producer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_pref1_8101.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=1 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_A}\" VLLM_NIXL_SIDE_CHANNEL_PORT=5552 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8102 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_producer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_pref2_8102.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=2 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_A}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6001 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8201 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec1_8201.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=3 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_A}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6002 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8202 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec2_8202.log\" 2>&1 &
+' > /dev/null 2>&1 &"
+
+echo "=== [3/5] Launching 4 Decode Engines on ${NODE_B} ==="
+ssh "${NODE_B}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  CUDA_VISIBLE_DEVICES=0 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_B}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6003 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8203 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec3_8203.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=1 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_B}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6004 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8204 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec4_8204.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=2 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_B}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6005 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8205 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec5_8205.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=3 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_B}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6006 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8206 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_2p6d_dec6_8206.log\" 2>&1 &
+' > /dev/null 2>&1 &"
+
+MAX_WAIT="${MAX_WAIT:-300}"
+
+echo "Waiting for prefill engines on ${NODE_A}..."
+for p in 8101 8102; do
+  ELAPSED=0
+  until curl -s -f "http://${IP_A}:${p}/health" > /dev/null 2>&1; do
+    if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on ${NODE_A}:${p}"; exit 1; fi
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+  done
+  echo "[✓] Prefill engine on ${NODE_A}:${p} is ready!"
+done
+
+echo "Waiting for decoders on ${NODE_A}..."
+for p in 8201 8202; do
+  ELAPSED=0
+  until curl -s -f "http://${IP_A}:${p}/health" > /dev/null 2>&1; do
+    if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on ${NODE_A}:${p}"; exit 1; fi
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+  done
+  echo "[✓] Decoder on ${NODE_A}:${p} is ready!"
+done
+
+echo "Waiting for decoders on ${NODE_B}..."
+for p in 8203 8204 8205 8206; do
+  ELAPSED=0
+  until curl -s -f "http://${IP_B}:${p}/health" > /dev/null 2>&1; do
+    if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on ${NODE_B}:${p}"; exit 1; fi
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+  done
+  echo "[✓] Decoder on ${NODE_B}:${p} is ready!"
+done
+
+echo "=== [4/5] Launching Canonical 2P:6D Proxy on ${NODE_A}:8000 ==="
+ssh "${NODE_A}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  python3 \"${PROXY_SCRIPT}\" --port 8000 \
+    --prefiller-hosts ${IP_A} ${IP_A} --prefiller-ports 8101 8102 \
+    --decoder-hosts 127.0.0.1 127.0.0.1 ${IP_B} ${IP_B} ${IP_B} ${IP_B} \
+    --decoder-ports 8201 8202 8203 8204 8205 8206 \
+    >> \"${LOG_DIR}/disagg_2p6d_proxy_8000.log\" 2>&1
+' > /dev/null 2>&1 &"
+
+echo "Waiting for proxy (8000)..."
+ELAPSED=0
+until curl -s -f "http://${IP_A}:8000/healthcheck" > /dev/null 2>&1; do
+  if [ "$ELAPSED" -ge 30 ]; then echo "[!] TIMEOUT: Disagg 2P:6D proxy failed."; exit 1; fi
+  sleep 1; ELAPSED=$((ELAPSED + 1))
+done
+echo "[✓] Disagg 2P:6D Proxy is ready on ${NODE_A}:8000!"

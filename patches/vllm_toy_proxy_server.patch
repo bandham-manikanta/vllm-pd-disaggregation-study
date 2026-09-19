@@ -1,0 +1,24 @@
+diff --git a/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py b/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py
+index 1a910c8d24..2d4d1054b9 100644
+--- a/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py
++++ b/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py
+@@ -169,6 +169,7 @@ async def send_request_to_service(
+     }
+     req_data["stream"] = False
+     req_data["max_tokens"] = 1
++    req_data["return_token_ids"] = True
+     if "max_completion_tokens" in req_data:
+         req_data["max_completion_tokens"] = 1
+     if "stream_options" in req_data:
+@@ -234,6 +235,11 @@ async def _handle_completions(api: str, request: Request):
+         await response.aclose()  # CRITICAL: Release connection back to pool
+         kv_transfer_params = response_json.get("kv_transfer_params", {})
+         if kv_transfer_params:
++            choices = response_json.get("choices", [])
++            if choices and "prompt_token_ids" in choices[0]:
++                kv_transfer_params["prompt_token_ids"] = choices[0]["prompt_token_ids"]
++            elif "prompt_token_ids" in response_json:
++                kv_transfer_params["prompt_token_ids"] = response_json["prompt_token_ids"]
+             req_data["kv_transfer_params"] = kv_transfer_params
+ 
+         # Get the next decode client in round-robin fashion

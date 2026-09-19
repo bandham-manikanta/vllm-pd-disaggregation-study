@@ -1,0 +1,101 @@
+﻿#!/bin/bash
+#
+# launch_disagg_4p4d_ib.sh
+#
+# Cross-Node Disaggregated 4P:4D over 100G InfiniBand (8 GPUs across 2 Nodes):
+#   - Node A (a100-04): 4 Prefill GPUs (2x TP=2 engines on Ports 8101, 8102)
+#   - Node B (a100-02): 4 Decode GPUs  (2x TP=2 engines on Ports 8201, 8202)
+#   - Proxy:  Node A Port 8000
+#
+set -euo pipefail
+
+MODEL=${1:-"Qwen/Qwen3-8B"}
+NODE_PREFILL=${NODE_PREFILL:-"a100-04"}
+NODE_DECODE=${NODE_DECODE:-"a100-02"}
+IP_PREFILL=${IP_PREFILL:-"10.10.4.174"}
+IP_DECODE=${IP_DECODE:-"10.10.4.172"}
+
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
+VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+LOG_DIR="${PROJECT_DIR}/logs"
+PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
+
+export PATH="${VENV_DIR}/bin:$PATH"
+mkdir -p "$LOG_DIR"
+
+echo "================================================================="
+echo " Launching Cross-Node Disaggregated 4P:4D over 100G InfiniBand"
+echo " Prefill Node (${NODE_PREFILL}): 2x TP=2 on Ports 8101, 8102"
+echo " Decode Node  (${NODE_DECODE}): 2x TP=2 on Ports 8201, 8202"
+echo " Proxy:       ${NODE_PREFILL} Port 8000"
+echo " Model:       ${MODEL}"
+echo "================================================================="
+
+echo "=== [1/5] Cleaning prior processes on ${NODE_PREFILL} and ${NODE_DECODE} ==="
+bash "${PROJECT_DIR}/scripts/stop_services.sh" "${NODE_PREFILL}" "${NODE_DECODE}"
+
+echo "=== [2/5] Launching Prefill Engines on ${NODE_PREFILL} ==="
+ssh "${NODE_PREFILL}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  CUDA_VISIBLE_DEVICES=0,1 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_PREFILL}\" VLLM_NIXL_SIDE_CHANNEL_PORT=5551 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 2 --port 8101 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_producer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_4p4d_prefill1_8101.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=2,3 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_PREFILL}\" VLLM_NIXL_SIDE_CHANNEL_PORT=5552 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 2 --port 8102 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_producer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_4p4d_prefill2_8102.log\" 2>&1 &
+' > /dev/null 2>&1 &"
+
+echo "=== [3/5] Launching Decode Engines on ${NODE_DECODE} ==="
+ssh "${NODE_DECODE}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  CUDA_VISIBLE_DEVICES=0,1 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_DECODE}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6001 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 2 --port 8201 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_4p4d_decode1_8201.log\" 2>&1 &
+  CUDA_VISIBLE_DEVICES=2,3 UCX_NET_DEVICES=mlx5_0:1 VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_DECODE}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6002 \
+    vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 2 --port 8202 --gpu-memory-utilization 0.85 \
+    --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+    >> \"${LOG_DIR}/disagg_4p4d_decode2_8202.log\" 2>&1 &
+' > /dev/null 2>&1 &"
+
+MAX_WAIT="${MAX_WAIT:-300}"
+
+echo "Waiting for prefill engines on ${NODE_PREFILL}..."
+for p in 8101 8102; do
+  ELAPSED=0
+  until curl -s -f "http://${IP_PREFILL}:${p}/health" > /dev/null 2>&1; do
+    if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on ${NODE_PREFILL}:${p}"; exit 1; fi
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+  done
+  echo "[✓] Prefill engine on ${NODE_PREFILL}:${p} is ready!"
+done
+
+echo "Waiting for decode engines on ${NODE_DECODE}..."
+for p in 8201 8202; do
+  ELAPSED=0
+  until curl -s -f "http://${IP_DECODE}:${p}/health" > /dev/null 2>&1; do
+    if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on ${NODE_DECODE}:${p}"; exit 1; fi
+    sleep 2; ELAPSED=$((ELAPSED + 2))
+  done
+  echo "[✓] Decode engine on ${NODE_DECODE}:${p} is ready!"
+done
+
+echo "=== [4/5] Launching Disagg Proxy on ${NODE_PREFILL}:8000 ==="
+ssh "${NODE_PREFILL}" "nohup bash -c '
+  export PATH=\"${VENV_DIR}/bin:\$PATH\"
+  python3 \"${PROXY_SCRIPT}\" --port 8000 \
+    --prefiller-hosts ${IP_PREFILL} ${IP_PREFILL} --prefiller-ports 8101 8102 \
+    --decoder-hosts ${IP_DECODE} ${IP_DECODE} --decoder-ports 8201 8202 \
+    >> \"${LOG_DIR}/disagg_4p4d_proxy_8000.log\" 2>&1
+' > /dev/null 2>&1 &"
+
+echo "Waiting for proxy (8000)..."
+ELAPSED=0
+until curl -s -f "http://${IP_PREFILL}:8000/healthcheck" > /dev/null 2>&1; do
+  if [ "$ELAPSED" -ge 30 ]; then echo "[!] TIMEOUT: Disagg proxy failed."; exit 1; fi
+  sleep 1; ELAPSED=$((ELAPSED + 1))
+done
+echo "[✓] Disagg 4P:4D Proxy is ready on ${NODE_PREFILL}:8000!"

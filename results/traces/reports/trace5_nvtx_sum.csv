@@ -1,0 +1,8 @@
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Style,Range
+92.1,2170463055,2042,1062910.4,1046224.5,996035,2386521,71706.6,PushPop,:execute_context_0(0)_generation_2(2)
+4.2,98862532,2050,48225.6,46885.0,44397,141586,4731.3,PushPop,NCCL:ncclAllGather
+1.2,28893186,2,14446593.0,14446593.0,14412510,14480676,48200.6,PushPop,:execute_context_2(512)_generation_0(0)
+1.2,27823529,2,13911764.5,13911764.5,13558372,14265157,499772.5,PushPop,:execute_context_1(256)_generation_0(0)
+1.1,24956343,2,12478171.5,12478171.5,12460466,12495877,25039.4,PushPop,:execute_context_1(256)_generation_1(1)
+0.2,4375108,2,2187554.0,2187554.0,2185453,2189655,2971.3,PushPop,:execute_context_0(0)_generation_1(1)
+0.1,1314165,8,164270.6,168765.0,136753,188858,17160.3,PushPop,:execute_context_0(0)_generation_0(0)

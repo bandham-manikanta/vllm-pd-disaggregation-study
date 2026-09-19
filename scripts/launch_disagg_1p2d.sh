@@ -1,0 +1,187 @@
+﻿#!/bin/bash
+#
+# launch_disagg_1p2d.sh
+#
+# Disaggregated 1P:2D Asymmetric Multiplexing across 3 GPUs
+# Supports:
+#   - Single Node (a100-04): GPU 0 (P), GPU 1 (D1), GPU 2 (D2)
+#   - Cross Node: Node A (GPU 0=P) -> Node B (GPU 0=D1, GPU 1=D2)
+#   - Proxy: Port 8000
+#
+set -euo pipefail
+
+MODEL=${1:-"Qwen/Qwen3-8B"}
+NODE_PREFILL=${NODE_PREFILL:-"a100-04"}
+NODE_DECODE=${NODE_DECODE:-"a100-02"}
+IP_PREFILL=${IP_PREFILL:-"10.10.4.174"}
+IP_DECODE=${IP_DECODE:-"10.10.4.172"}
+
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
+VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+LOG_DIR="${PROJECT_DIR}/logs"
+PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
+
+export PATH="${VENV_DIR}/bin:$PATH"
+mkdir -p "$LOG_DIR"
+
+if [ "${NODE_PREFILL}" = "${NODE_DECODE}" ]; then
+  GPU_P=0
+  GPU_D1=1
+  GPU_D2=2
+  IS_SINGLE_NODE=1
+  UCX_NET_DEV="all"
+else
+  GPU_P=0
+  GPU_D1=0
+  GPU_D2=1
+  IS_SINGLE_NODE=0
+  UCX_NET_DEV="mlx5_0:1"
+fi
+
+LOG_PREFILL="${LOG_DIR}/disagg_1p2d_prefill_8100.log"
+LOG_DEC1="${LOG_DIR}/disagg_1p2d_decode1_8201.log"
+LOG_DEC2="${LOG_DIR}/disagg_1p2d_decode2_8202.log"
+LOG_PROXY="${LOG_DIR}/disagg_1p2d_proxy_8000.log"
+
+echo "================================================================="
+echo " Launching Disaggregated 1P:2D (3 GPUs)"
+echo " Prefill:   ${NODE_PREFILL} GPU ${GPU_P} (TP=1, Port 8100)"
+echo " Decoder 1: ${NODE_DECODE}  GPU ${GPU_D1} (TP=1, Port 8201)"
+echo " Decoder 2: ${NODE_DECODE}  GPU ${GPU_D2} (TP=1, Port 8202)"
+echo " Proxy:     ${NODE_DECODE}  Port 8000"
+echo " Model:     ${MODEL}"
+echo " Transport: UCX_NET_DEVICES=${UCX_NET_DEV}"
+echo " Mode:      $([ "$IS_SINGLE_NODE" -eq 1 ] && echo 'Single Node Native' || echo 'Cross-Node SSH')"
+echo "================================================================="
+
+echo "=== [1/5] Cleaning prior processes ==="
+if [ "$IS_SINGLE_NODE" -eq 1 ]; then
+  bash "${PROJECT_DIR}/scripts/stop_services.sh" "${NODE_PREFILL}"
+else
+  bash "${PROJECT_DIR}/scripts/stop_services.sh" "${NODE_PREFILL}" "${NODE_DECODE}"
+fi
+
+echo "=== [2/5] Launching Prefill on GPU ${GPU_P} (Port 8100) ==="
+if [ "$IS_SINGLE_NODE" -eq 1 ]; then
+  CUDA_VISIBLE_DEVICES=${GPU_P} \
+  UCX_NET_DEVICES=${UCX_NET_DEV} \
+  VLLM_NIXL_SIDE_CHANNEL_PORT=5559 \
+  nohup vllm serve "${MODEL}" \
+    --host 0.0.0.0 \
+    --tensor-parallel-size 1 \
+    --port 8100 \
+    --gpu-memory-utilization 0.85 \
+    --kv-transfer-config '{"kv_connector": "NixlConnector", "kv_role": "kv_producer", "kv_buffer_device": "cuda", "kv_connector_extra_config": {"kv_lease_duration": 300}}' \
+    >> "${LOG_PREFILL}" 2>&1 &
+  PID_P=$!
+else
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NODE_PREFILL}" "nohup bash -c '
+    export PATH=\"${VENV_DIR}/bin:\$PATH\"
+    CUDA_VISIBLE_DEVICES=${GPU_P} UCX_NET_DEVICES=${UCX_NET_DEV} VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_PREFILL}\" VLLM_NIXL_SIDE_CHANNEL_PORT=5559 \
+      vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8100 --gpu-memory-utilization 0.85 \
+      --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_producer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+      >> \"${LOG_PREFILL}\" 2>&1
+  ' > /dev/null 2>&1 &"
+  PID_P=""
+fi
+
+echo "=== [3/5] Launching Decoder 1 on GPU ${GPU_D1} (Port 8201) ==="
+if [ "$IS_SINGLE_NODE" -eq 1 ]; then
+  CUDA_VISIBLE_DEVICES=${GPU_D1} \
+  UCX_NET_DEVICES=${UCX_NET_DEV} \
+  VLLM_NIXL_SIDE_CHANNEL_PORT=6001 \
+  nohup vllm serve "${MODEL}" \
+    --host 0.0.0.0 \
+    --tensor-parallel-size 1 \
+    --port 8201 \
+    --gpu-memory-utilization 0.85 \
+    --kv-transfer-config '{"kv_connector": "NixlConnector", "kv_role": "kv_consumer", "kv_buffer_device": "cuda", "kv_connector_extra_config": {"kv_lease_duration": 300}}' \
+    >> "${LOG_DEC1}" 2>&1 &
+  PID_D1=$!
+else
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NODE_DECODE}" "nohup bash -c '
+    export PATH=\"${VENV_DIR}/bin:\$PATH\"
+    CUDA_VISIBLE_DEVICES=${GPU_D1} UCX_NET_DEVICES=${UCX_NET_DEV} VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_DECODE}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6001 \
+      vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8201 --gpu-memory-utilization 0.85 \
+      --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+      >> \"${LOG_DEC1}\" 2>&1
+  ' > /dev/null 2>&1 &"
+  PID_D1=""
+fi
+
+echo "=== [4/5] Launching Decoder 2 on GPU ${GPU_D2} (Port 8202) ==="
+if [ "$IS_SINGLE_NODE" -eq 1 ]; then
+  CUDA_VISIBLE_DEVICES=${GPU_D2} \
+  UCX_NET_DEVICES=${UCX_NET_DEV} \
+  VLLM_NIXL_SIDE_CHANNEL_PORT=6002 \
+  nohup vllm serve "${MODEL}" \
+    --host 0.0.0.0 \
+    --tensor-parallel-size 1 \
+    --port 8202 \
+    --gpu-memory-utilization 0.85 \
+    --kv-transfer-config '{"kv_connector": "NixlConnector", "kv_role": "kv_consumer", "kv_buffer_device": "cuda", "kv_connector_extra_config": {"kv_lease_duration": 300}}' \
+    >> "${LOG_DEC2}" 2>&1 &
+  PID_D2=$!
+else
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NODE_DECODE}" "nohup bash -c '
+    export PATH=\"${VENV_DIR}/bin:\$PATH\"
+    CUDA_VISIBLE_DEVICES=${GPU_D2} UCX_NET_DEVICES=${UCX_NET_DEV} VLLM_NIXL_SIDE_CHANNEL_HOST=\"${IP_DECODE}\" VLLM_NIXL_SIDE_CHANNEL_PORT=6002 \
+      vllm serve \"${MODEL}\" --host 0.0.0.0 --tensor-parallel-size 1 --port 8202 --gpu-memory-utilization 0.85 \
+      --kv-transfer-config \"{\\\"kv_connector\\\": \\\"NixlConnector\\\", \\\"kv_role\\\": \\\"kv_consumer\\\", \\\"kv_buffer_device\\\": \\\"cuda\\\", \\\"kv_connector_extra_config\\\": {\\\"kv_lease_duration\\\": 300}}\" \
+      >> \"${LOG_DEC2}\" 2>&1
+  ' > /dev/null 2>&1 &"
+  PID_D2=""
+fi
+
+MAX_WAIT="${MAX_WAIT:-300}"
+
+echo "Waiting for Prefill server (Port 8100)..."
+ELAPSED=0
+until curl -s -f "http://${IP_PREFILL}:8100/health" > /dev/null 2>&1; do
+  if [ -n "$PID_P" ] && ! kill -0 "$PID_P" 2>/dev/null; then echo "[!] FATAL: Prefill exited!"; tail -n 30 "${LOG_PREFILL}"; exit 1; fi
+  if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on prefill"; tail -n 30 "${LOG_PREFILL}"; exit 1; fi
+  sleep 2; ELAPSED=$((ELAPSED + 2))
+  if [ $((ELAPSED % 10)) -eq 0 ]; then echo "    ... waiting for prefill (${ELAPSED}s / ${MAX_WAIT}s)"; fi
+done
+echo "[✓] Prefill server is ready!"
+
+echo "Waiting for Decoder 1 (Port 8201)..."
+ELAPSED=0
+until curl -s -f "http://${IP_DECODE}:8201/health" > /dev/null 2>&1; do
+  if [ -n "$PID_D1" ] && ! kill -0 "$PID_D1" 2>/dev/null; then echo "[!] FATAL: Decoder 1 exited!"; tail -n 30 "${LOG_DEC1}"; exit 1; fi
+  if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on Decoder 1"; tail -n 30 "${LOG_DEC1}"; exit 1; fi
+  sleep 2; ELAPSED=$((ELAPSED + 2))
+  if [ $((ELAPSED % 10)) -eq 0 ]; then echo "    ... waiting for Decoder 1 (${ELAPSED}s / ${MAX_WAIT}s)"; fi
+done
+echo "[✓] Decoder 1 is ready!"
+
+echo "Waiting for Decoder 2 (Port 8202)..."
+ELAPSED=0
+until curl -s -f "http://${IP_DECODE}:8202/health" > /dev/null 2>&1; do
+  if [ -n "$PID_D2" ] && ! kill -0 "$PID_D2" 2>/dev/null; then echo "[!] FATAL: Decoder 2 exited!"; tail -n 30 "${LOG_DEC2}"; exit 1; fi
+  if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then echo "[!] TIMEOUT on Decoder 2"; tail -n 30 "${LOG_DEC2}"; exit 1; fi
+  sleep 2; ELAPSED=$((ELAPSED + 2))
+  if [ $((ELAPSED % 10)) -eq 0 ]; then echo "    ... waiting for Decoder 2 (${ELAPSED}s / ${MAX_WAIT}s)"; fi
+done
+echo "[✓] Decoder 2 is ready!"
+
+echo "=== [5/5] Launching Disagg 1P:2D Proxy on Port 8000 ==="
+nohup python3 "${PROXY_SCRIPT}" \
+  --port 8000 \
+  --prefiller-hosts "${IP_PREFILL}" --prefiller-ports 8100 \
+  --decoder-hosts "${IP_DECODE}" "${IP_DECODE}" --decoder-ports 8201 8202 \
+  >> "${LOG_PROXY}" 2>&1 &
+PID_PROXY=$!
+
+echo "Waiting for Disagg Proxy (8000)..."
+ELAPSED=0
+until curl -s -f "http://127.0.0.1:8000/healthcheck" > /dev/null 2>&1; do
+  if ! kill -0 "$PID_PROXY" 2>/dev/null; then echo "[!] FATAL: Proxy exited!"; tail -n 30 "${LOG_PROXY}"; exit 1; fi
+  if [ "$ELAPSED" -ge 30 ]; then echo "[!] TIMEOUT on proxy"; tail -n 30 "${LOG_PROXY}"; exit 1; fi
+  sleep 1; ELAPSED=$((ELAPSED + 1))
+done
+echo "[✓] Disagg 1P:2D Proxy is ready on Port 8000!"
+echo "================================================================="
+echo " ALL SERVICES READY! Target Endpoint: http://127.0.0.1:8000/v1/completions"
+echo "================================================================="
