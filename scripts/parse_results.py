@@ -94,7 +94,7 @@ def generate_report(
     bytes_per_token: int = DEFAULT_BYTES_PER_TOKEN,
 ) -> str:
     lines = []
-    lines.append(f"# Empirical Systems Report: {col_label} vs. {dis_label}")
+    lines.append(f"# Benchmark Report: {col_label} vs. {dis_label}")
     lines.append("")
     lines.append(f"- **Collocated Dataset:** `{collocated_dir}`")
     lines.append(f"- **Disaggregated Dataset:** `{disagg_dir}`")

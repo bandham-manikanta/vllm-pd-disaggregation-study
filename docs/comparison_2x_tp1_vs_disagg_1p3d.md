@@ -1,4 +1,4 @@
-# Empirical Systems Report: Collocated (2x TP1) vs. Disaggregated (P:3D)
+# Benchmark Report: Collocated (2x TP1) vs. Disaggregated (P:3D)
 
 - **Collocated Dataset:** `results/collocated_2x_tp1`
 - **Disaggregated Dataset:** `results/disagg_1p3d`

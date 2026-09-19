@@ -87,7 +87,7 @@ In Collocated serving, when an 8k prefill lands on the engine, the CUDA hardware
 
 ---
 
-## Summary of Empirical Takeaways for the Research Paper
+## Key Technical Takeaways
 
 1. **Why Disaggregation Eliminates Tail Latency (P99 ITL):** It is mathematically impossible for a disaggregated decoder to experience Head-of-Line prefill blocking because large prefill GEMMs (`s16816gemm_256x128`) are physically isolated on the P-worker and occupy **0.0%** of the D-worker's SM resources.
 2. **The Nature of the InfiniBand Tax:** InfiniBand does not harm token generation pacing once started, but it introduces a massive driver stall overhead (**73.5% time in `cuStreamSynchronize`**) during initial KV transfer, penalizing TTFT by up to $1.76\text{ seconds}$ on 16k context.

@@ -1,4 +1,4 @@
-# Empirical Systems Report: Disagg (NVLink 12) vs. Disagg (100G InfiniBand)
+# Benchmark Report: Disagg (NVLink 12) vs. Disagg (100G InfiniBand)
 
 - **Collocated Dataset:** `results/disagg_1p1d`
 - **Disaggregated Dataset:** `results/disagg_1p1d_ib`
