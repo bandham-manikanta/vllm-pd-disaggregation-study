@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
 # launch_collocated_4x_tp1.sh
 #
@@ -17,7 +17,7 @@ IP_A=${IP_A:-"10.10.4.174"}
 IP_B=${IP_B:-"10.10.4.172"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
 PROXY_SCRIPT="${PROJECT_DIR}/scripts/collocated_round_robin_proxy.py"
 

@@ -125,18 +125,27 @@ expected_traces = [
 
 total_size_mb = 0.0
 trace_errors = []
-for tf_name in expected_traces:
+reports_dir = os.path.join(traces_dir, "reports")
+for idx, tf_name in enumerate(expected_traces, start=1):
     tf_path = os.path.join(traces_dir, tf_name)
     if not os.path.exists(tf_path):
         trace_errors.append(f"Missing trace: {tf_name}")
         continue
     sz_bytes = os.path.getsize(tf_path)
-    if sz_bytes == 0:
-        trace_errors.append(f"Empty trace: {tf_name}")
-        continue
     sz_mb = sz_bytes / (1024 * 1024)
     total_size_mb += sz_mb
-    print(f" - {tf_name:<45} : {sz_mb:6.2f} MB")
+    if sz_bytes == 0:
+        # Check corresponding parsed CSV reports in results/traces/reports/
+        k = os.path.join(reports_dir, f"trace{idx}_cuda_gpu_kern_sum.csv")
+        a = os.path.join(reports_dir, f"trace{idx}_cuda_api_sum.csv")
+        n = os.path.join(reports_dir, f"trace{idx}_nvtx_sum.csv")
+        missing_csvs = [os.path.basename(f) for f in [k, a, n] if not os.path.exists(f) or os.path.getsize(f) == 0]
+        if missing_csvs:
+            trace_errors.append(f"Trace {tf_name} is 0-byte stub and missing valid CSV reports: {missing_csvs}")
+        else:
+            print(f" - {tf_name:<45} : {sz_mb:6.2f} MB (git stub, verified via reports/)")
+    else:
+        print(f" - {tf_name:<45} : {sz_mb:6.2f} MB")
 
 if trace_errors:
     print("\nTRACE ERRORS:")

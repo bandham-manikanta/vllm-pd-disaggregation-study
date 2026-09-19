@@ -1,8 +1,8 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
-# launch_collocated_1x_tp1.sh
+# launch_collocated_1x_tp2.sh
 #
-# Launch Single Collocated vLLM Instance (TP=1 on GPU 0, Port 8000)
+# Launch Single Collocated vLLM Instance with TP=2 on GPUs 0,1 (Port 8000)
 #
 set -euo pipefail
 
@@ -10,9 +10,9 @@ MODEL=${1:-"Qwen/Qwen3-8B"}
 PORT=${2:-8000}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
-LOG_FILE="${LOG_DIR}/collocated_1x_tp1_8000.log"
+LOG_FILE="${LOG_DIR}/collocated_1x_tp2_8000.log"
 
 export PATH="${VENV_DIR}/bin:$PATH"
 mkdir -p "$LOG_DIR"
@@ -20,10 +20,10 @@ mkdir -p "$LOG_DIR"
 echo "=== Cleaning prior processes on port $PORT for user $USER ==="
 bash "${PROJECT_DIR}/scripts/stop_services.sh"
 
-echo "=== Launching Collocated vLLM (TP=1 on GPU 0, Port $PORT) ==="
-CUDA_VISIBLE_DEVICES=0 \
+echo "=== Launching Collocated vLLM (TP=2 on GPUs 0,1, Port $PORT) ==="
+CUDA_VISIBLE_DEVICES=0,1 \
 nohup vllm serve "$MODEL" \
-  --tensor-parallel-size 1 \
+  --tensor-parallel-size 2 \
   --port "$PORT" \
   --gpu-memory-utilization 0.85 \
   >> "$LOG_FILE" 2>&1 &
@@ -50,4 +50,4 @@ until curl -s -f "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; do
     echo "    ... waiting for collocated server (${ELAPSED}s / ${MAX_WAIT}s)"
   fi
 done
-echo "[✓] Collocated server ($PORT, TP=1) is ready! Logs: $LOG_FILE"
+echo "[✓] Collocated server ($PORT, TP=2) is ready! Logs: $LOG_FILE"

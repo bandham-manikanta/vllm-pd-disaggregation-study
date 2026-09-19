@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
 # launch_disagg_1p1d_ib.sh
 #
@@ -17,8 +17,8 @@ IP_PREFILL=${IP_PREFILL:-"10.10.4.174"}
 IP_DECODE=${IP_DECODE:-"10.10.4.172"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VLLM_DIR="${VLLM_DIR:-/gpfs/projects/MaffeiGroup/open-source-contributions/vllm}"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
 PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
 

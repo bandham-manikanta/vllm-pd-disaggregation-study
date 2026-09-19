@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 #
 # run_benchmarks.sh - Canonical vLLM Benchmark Suite
 #
@@ -33,7 +33,7 @@ MODEL_NAME=${3:-"Qwen/Qwen3-8B"}
 HOST=${4:-"127.0.0.1"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 VLLM_BIN="${VENV_DIR}/bin/vllm"
 OUT_DIR="${PROJECT_DIR}/results/${SYSTEM_NAME}"
 
@@ -181,6 +181,7 @@ echo "[+] Step 1: Launching sustained background prefill storm (8192 in x 16 out
   --result-dir "${OUT_DIR}" \
   --result-filename "${BURST_OUT_FILE}" &
 BURST_PID=$!
+trap 'kill "${BURST_PID}" 2>/dev/null || true' EXIT INT TERM
 
 sleep 1.0
 
@@ -202,6 +203,7 @@ echo "[+] Step 2: Firing interactive decode stream directly into the prefill sto
 
 echo "[*] Step 3: Waiting for background prefill storm to finalize cleanly..."
 wait "${BURST_PID}" 2>/dev/null || true
+trap - EXIT INT TERM
 echo "[✓] Burst Shockwave test complete. Both result files successfully flushed to disk."
 sleep 3
 

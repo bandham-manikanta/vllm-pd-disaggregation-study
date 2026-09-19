@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
 # launch_disagg_2p6d_ib.sh
 #
@@ -16,8 +16,8 @@ IP_A=${IP_A:-"10.10.4.174"}
 IP_B=${IP_B:-"10.10.4.172"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VLLM_DIR="${VLLM_DIR:-/gpfs/projects/MaffeiGroup/open-source-contributions/vllm}"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
 PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
 

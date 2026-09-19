@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 #
 # capture_nsys_traces.sh - Automated 8-Trace Nsight Systems Profiling Suite
 # Captures publication-grade hardware execution timelines across 8 key architectures.
@@ -12,8 +12,8 @@ IP1="10.10.4.174"
 IP2="10.10.4.172"
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VLLM_DIR="${VLLM_DIR:-/gpfs/projects/MaffeiGroup/open-source-contributions/vllm}"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 VLLM_BIN="${VENV_DIR}/bin/vllm"
 OUT_DIR="${PROJECT_DIR}/results/traces"
 LOG_DIR="${PROJECT_DIR}/logs"

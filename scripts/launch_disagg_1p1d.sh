@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
 # launch_disagg_1p1d.sh
 #
@@ -12,8 +12,8 @@ set -euo pipefail
 MODEL=${1:-"Qwen/Qwen3-8B"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VLLM_DIR="/gpfs/projects/MaffeiGroup/open-source-contributions/vllm"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VLLM_DIR="${VLLM_DIR:-/gpfs/projects/MaffeiGroup/open-source-contributions/vllm}"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
 PROXY_SCRIPT="${VLLM_DIR}/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py"
 

@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 #
 # launch_collocated_2x_tp1.sh
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 MODEL=${1:-"Qwen/Qwen3-8B"}
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VENV_DIR="/gpfs/projects/MaffeiGroup/venvs/vllm_venv"
+VENV_DIR="${VENV_DIR:-/gpfs/projects/MaffeiGroup/venvs/vllm_venv}"
 LOG_DIR="${PROJECT_DIR}/logs"
 PROXY_SCRIPT="${PROJECT_DIR}/scripts/collocated_round_robin_proxy.py"
 
